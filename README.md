@@ -1,1 +1,1 @@
-/.local/bin backup fore pre-lualization of Hyprland
+/.local/bin backup for pre-lualization of Hyprland
