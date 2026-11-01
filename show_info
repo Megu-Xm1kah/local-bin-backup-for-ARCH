@@ -1,0 +1,207 @@
+#!/bin/bash
+# 1. Handle Input: Default to "." if empty, then resolve to Absolute Path
+INPUT="${1:-.}"
+TARGET="$(realpath "$INPUT")"
+tput clear
+
+# --- CACHE SETTINGS ---
+CACHE_DIR="$HOME/.cache/term_file_info"
+mkdir -p "$CACHE_DIR"
+
+# Generate a hash of the path + modification time for unique ID
+PATH_HASH=$(echo -n "$TARGET" | md5sum | cut -d' ' -f1)
+LAST_MOD=$(stat -c %Y "$TARGET")
+CACHE_FILE="$CACHE_DIR/${PATH_HASH}_${LAST_MOD}.ansi"
+
+# --- COLORS ---
+C_PURPLE="\033[1;35m"
+C_CYAN="\033[1;36m"
+C_BLUE="\033[1;34m"
+C_YELLOW="\033[1;33m"
+C_GREEN="\033[1;32m"
+C_RED="\033[1;31m"
+C_RESET="\033[0m"
+C_GRAY="\033[1;30m"
+
+# --- PATH HANDLING ---
+REALPATH="$TARGET"
+DISPLAY_PATH="${REALPATH/#$HOME/~}"
+NAME=$(basename "$TARGET")
+MIME=$(file -b --mime-type "$TARGET")
+
+# --- HEADER FUNCTION ---
+print_header() {
+    echo -e "$1$2$C_RESET"
+    echo "  📍  Path          : $DISPLAY_PATH"
+    echo "  🏷️  Name          : $NAME"
+    echo "--------------------------------------------------"
+}
+
+# --- MAIN ANALYSIS FUNCTION ---
+generate_analysis() {
+    
+    # --- DIRECTORY ---
+    if [ -d "$TARGET" ]; then
+        print_header "$C_PURPLE" "📂 FOLDER ANALYSIS"
+
+        SIZE=$(du -shx "$TARGET" 2>/dev/null | cut -f1)
+        ITEMS=$(ls -1A "$TARGET" 2>/dev/null | wc -l)
+        
+        # Depth 1 stats
+        SUBS_L1=$(find "$TARGET" -mindepth 1 -maxdepth 1 -type d | wc -l)
+        FILES_L1=$(find "$TARGET" -maxdepth 1 -type f | wc -l)
+        
+        # Recursive stats
+        TOTAL_DIRS=$(find "$TARGET" -xdev -mindepth 1 -type d 2>/dev/null | wc -l)
+        TOTAL_FILES=$(find "$TARGET" -xdev -type f 2>/dev/null | wc -l)
+        
+        PERM=$(stat -c "%a %A" "$TARGET")
+        OWNER=$(stat -c "%U:%G" "$TARGET")
+        MOD=$(stat -c "%y" "$TARGET" | cut -d. -f1)
+
+        # Cleaned up layout: removed separators and extra text
+        # Added spaces to align colons vertically
+        printf "  💾  Disk Usage        : %s\n" "$SIZE"
+        printf "  📦  Total Items       : %s\n" "$ITEMS"
+        printf "  📂  Sub-folders       : %s\n" "$SUBS_L1"
+        printf "  📚  Total Folders     : %s\n" "$TOTAL_DIRS"
+        printf "  📄  Files             : %s\n" "$FILES_L1"
+        printf "  💻  Total Files       : %s\n" "$TOTAL_FILES"
+        printf "  🔒  Permissions       : %s\n" "$PERM"
+        printf "  👤  Owner             : %s\n" "$OWNER"
+        printf "  🕒  Last Modified     : %s\n" "$MOD"
+
+        # Recursive File Type Breakdown
+        if [ "$TOTAL_FILES" -gt 0 ]; then
+            echo "--------------------------------------------------"
+            echo -e "${C_PURPLE}  📊  File Types:${C_RESET}"
+            
+            find "$TARGET" -xdev -type f -printf "%f\n" 2>/dev/null | \
+            awk -F. '{if (NF>1) {print $NF} else {print "no-ext"}}' | \
+            tr '[:upper:]' '[:lower:]' | \
+            sort | uniq -c | sort -nr | head -n 8 | \
+            while read count ext; do
+                printf "      %-10s : %s\n" ".$ext" "$count"
+            done
+        fi
+        echo "--------------------------------------------------"
+        printf "${C_PURPLE}[FOLDER]"
+
+    # --- VIDEO ---
+    elif [[ "$MIME" == video/* ]]; then
+        print_header "$C_CYAN" "🎬 CINEMA METRICS"
+
+        ffprobe -v error -select_streams v:0 \
+            -show_entries stream=width,height,avg_frame_rate,codec_name \
+            -show_entries format=duration,size,bit_rate \
+            -of default=noprint_wrappers=1:nokey=0 "$TARGET" | awk -F= '
+            /width/ {w=$2}
+            /height/ {h=$2}
+            /codec_name/ {c=$2}
+            /duration/ {d=$2; dur=sprintf("%02d:%02d",int(d/60),int(d%60))}
+            /size/ {size=sprintf("%.2f MB",$2/1024/1024)}
+            /bit_rate/ {rate=sprintf("%.0f kbps",$2/1000)}
+            /avg_frame_rate/ {
+                split($2,a,"/");
+                fps=(a[2]>0)?sprintf("%.3f",a[1]/a[2]):"0"
+            }
+            END {
+                print "  🎥  Resolution    : " w "x" h " (" c ")"
+                print "  ⏱️  Duration      : " dur
+                print "  🎞️  Frame Rate    : " fps " fps"
+                print "  💾  File Size     : " size
+                print "  ⚡  Bitrate       : " rate
+            }'
+        echo "--------------------------------------------------"
+        printf "${C_CYAN}[VIDEO]"
+
+    # --- AUDIO ---
+    elif [[ "$MIME" == audio/* ]]; then
+        print_header "$C_BLUE" "🎵 AUDIO METRICS"
+
+        ffprobe -v error -select_streams a:0 \
+            -show_entries stream=codec_name,sample_rate,channels \
+            -show_entries format=duration,size,bit_rate \
+            -of default=noprint_wrappers=1:nokey=0 "$TARGET" | awk -F= '
+            /codec_name/ {c=$2}
+            /sample_rate/ {sr=$2}
+            /channels/ {ch=$2}
+            /duration/ {d=$2; dur=sprintf("%02d:%02d",int(d/60),int(d%60))}
+            /size/ {size=sprintf("%.2f MB",$2/1024/1024)}
+            /bit_rate/ {rate=sprintf("%.0f kbps",$2/1000)}
+            END {
+                print "  🎼  Codec          : " c
+                print "  ⏱️  Duration       : " dur
+                print "  🎙️  Sample Rate    : " sr " Hz"
+                print "  🔊  Channels       : " ch
+                print "  💾  File Size      : " size
+                print "  ⚡  Bitrate        : " rate
+            }'
+        echo "--------------------------------------------------"
+        printf "${C_BLUE}[AUDIO]"
+
+    # --- IMAGE ---
+    elif [[ "$MIME" == image/* ]]; then
+        print_header "$C_YELLOW" "🖼️ IMAGE SPECS"
+
+        if command -v exiftool >/dev/null; then
+            exiftool "$TARGET" | awk -F': ' '
+                /File Size/   {print "  💾  File Size      : " $2}
+                /Image Size/  {print "  ✨  Resolution     : " $2}
+                /Megapixels/  {print "  📸  Megapixels     : " $2}
+                /Color Space/ {print "  🎨  Color Space    : " $2}
+                /Bit Depth/   {print "  🔢  Bit Depth      : " $2}
+                /Compression/ {print "  🗜️  Compression    : " $2}
+                /Modify Date/ {print "  🕒  Modified       : " $2}
+            ' | head -n 10
+        else
+            echo "  ❌ exiftool not installed"
+        fi
+        echo "--------------------------------------------------"
+        printf "${C_YELLOW}[IMAGE]"
+
+    # --- FILE / OTHER ---
+    else
+        if [[ "$MIME" == text/* || "$MIME" == application/json || "$MIME" == application/javascript || "$MIME" == application/x-shellscript ]]; then
+            HEADER_COLOR="$C_GREEN"
+            TITLE="📄 CODE / TEXT INFO"
+            LINES=$(wc -l < "$TARGET" 2>/dev/null)
+            WORDS=$(wc -w < "$TARGET" 2>/dev/null)
+        else
+            HEADER_COLOR="$C_RED"
+            TITLE="👾 BINARY / DATA INFO"
+            LINES="N/A"
+            WORDS="N/A"
+        fi
+
+        print_header "$HEADER_COLOR" "$TITLE"
+
+        SIZE=$(stat -c "%s" "$TARGET" | numfmt --to=iec)
+        PERM=$(stat -c "%a %A" "$TARGET")
+        MOD=$(stat -c "%y" "$TARGET" | cut -d. -f1)
+
+        printf "  📝  MIME Type      : %s\n" "$MIME"
+        printf "  💾  File Size      : %s\n" "$SIZE"
+        printf "  🔢  Line Count     : %s\n" "$LINES"
+        printf "  🔤  Word Count     : %s\n" "$WORDS"
+        printf "  🔒  Permissions    : %s\n" "$PERM"
+        printf "  🕒  Last Modified  : %s\n" "$MOD"
+
+        echo "--------------------------------------------------"
+        printf "${HEADER_COLOR}[FILE]"
+    fi
+}
+
+# --- CACHE LOGIC ---
+if [ -f "$CACHE_FILE" ]; then
+    # CACHE HIT
+    cat "$CACHE_FILE"
+    echo -e " (Cached) Press any key to return..."
+else
+    # CACHE MISS
+    rm -f "$CACHE_DIR/${PATH_HASH}_"* 2>/dev/null
+    generate_analysis | tee "$CACHE_FILE"
+    echo -e " Press any key to return..."
+fi
+
+read -rsn 1

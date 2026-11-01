@@ -1,0 +1,21 @@
+#!/bin/bash
+# USAGE: play_audio <files>...
+
+# 1. Clear the queue
+mpc clear > /dev/null
+
+# 2. Loop through every file passed by Yazi
+for file in "$@"; do
+    # STRIP THE PATH: Turn "/home/momochan/Music/Song.mp3" into "Song.mp3"
+    # IMPORTANT: This assumes your music is in ~/Music. 
+    REL_PATH="${file#$HOME/Music/}"
+    
+    # Add the clean filename to MPD
+    mpc add "$REL_PATH"
+done
+
+# 3. Play
+mpc play
+
+# 4. (Optional) Wait 1 second so you can see if errors happen, then close.
+sleep 1

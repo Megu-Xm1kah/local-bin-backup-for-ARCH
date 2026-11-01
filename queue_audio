@@ -1,0 +1,5 @@
+#!/bin/bash
+for file in "$@"; do
+  REL_PATH="${file#/home/momochan/Music/}"
+  mpc add "$REL_PATH"
+done
